@@ -15,6 +15,9 @@ export interface StorageStats {
   fileCount: number;
   folderCount: number;
   isRealDisk?: boolean;
+  freeBytes?: number;
+  systemUsedBytes?: number;
+  otherFilesBytes?: number;
 }
 
 export interface ClipboardState {

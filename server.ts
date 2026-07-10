@@ -145,13 +145,20 @@ async function startServer() {
       
       let limit = 0;
       let isRealDisk = false;
+      let freeBytes = 0;
+      let systemUsedBytes = 0;
+      let otherFilesBytes = 0;
       
       try {
         if (fs.promises && typeof fs.promises.statfs === 'function') {
           const diskStats = await fs.promises.statfs(DATA_STORE_ROOT);
           const totalDiskBytes = Number(diskStats.blocks) * Number(diskStats.bsize);
+          const freeDiskBytes = Number(diskStats.bfree) * Number(diskStats.bsize);
           if (totalDiskBytes > 0) {
             limit = totalDiskBytes;
+            freeBytes = freeDiskBytes;
+            systemUsedBytes = totalDiskBytes - freeDiskBytes;
+            otherFilesBytes = Math.max(0, systemUsedBytes - stats.size);
             isRealDisk = true;
           }
         }
@@ -162,6 +169,9 @@ async function startServer() {
       res.json({
         usedBytes: stats.size,
         totalBytesLimit: limit,
+        freeBytes: freeBytes,
+        systemUsedBytes: systemUsedBytes,
+        otherFilesBytes: otherFilesBytes,
         fileCount: stats.fileCount,
         folderCount: stats.folderCount,
         isRealDisk: isRealDisk

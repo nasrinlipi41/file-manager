@@ -21,7 +21,13 @@ interface SidebarProps {
 
 export default function Sidebar({ stats, selectedCategory, setSelectedCategory, loading }: SidebarProps) {
   // Calculate percentage used
-  const usedPercent = stats ? Math.min(100, (stats.usedBytes / stats.totalBytesLimit) * 100) : 0;
+  const totalLimit = stats?.totalBytesLimit ?? 0;
+  const myUsed = stats?.usedBytes ?? 0;
+  const otherUsed = stats?.otherFilesBytes ?? 0;
+  const freeBytes = stats?.freeBytes ?? 0;
+
+  const myUsedPercent = totalLimit > 0 ? Math.min(100, (myUsed / totalLimit) * 100) : 0;
+  const otherUsedPercent = totalLimit > 0 ? Math.min(100 - myUsedPercent, (otherUsed / totalLimit) * 100) : 0;
 
   const categories = [
     { id: 'all', name: 'সব ফাইল (All Files)', icon: Layers, color: 'text-blue-500 bg-blue-50 dark:bg-blue-950/20' },
@@ -83,7 +89,7 @@ export default function Sidebar({ stats, selectedCategory, setSelectedCategory, 
       </div>
 
       {/* Storage Information Widget */}
-      <div className="p-6 border-t border-slate-100 bg-slate-50/50">
+      <div className="p-5 border-t border-slate-100 bg-slate-50/50">
         <div className="flex items-center gap-3 mb-3">
           <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
             <HardDrive className="w-4 h-4" />
@@ -93,7 +99,9 @@ export default function Sidebar({ stats, selectedCategory, setSelectedCategory, 
               {stats?.isRealDisk ? 'সার্ভার ডিস্ক স্টোরেজ' : 'মোট ফাইল সাইজ'}
             </div>
             <div className="text-sm font-bold text-slate-700 font-mono">
-              {stats ? formatBytes(stats.usedBytes) : '0 Bytes'}
+              {stats 
+                ? (stats.isRealDisk ? formatBytes(stats.systemUsedBytes ?? 0) : formatBytes(stats.usedBytes)) 
+                : '0 Bytes'}
               {stats?.isRealDisk && stats.totalBytesLimit > 0 && (
                 <span className="text-xs text-slate-400 font-normal"> / {formatBytes(stats.totalBytesLimit)}</span>
               )}
@@ -103,17 +111,44 @@ export default function Sidebar({ stats, selectedCategory, setSelectedCategory, 
 
         {/* Progress Bar (Only shown if real disk space info is available) */}
         {stats?.isRealDisk && stats.totalBytesLimit > 0 && (
-          <div className="w-full bg-slate-200 rounded-full h-2 mb-3 overflow-hidden">
-            <div 
-              className={`h-full rounded-full transition-all duration-500 ${
-                usedPercent > 90 
-                  ? 'bg-rose-500' 
-                  : usedPercent > 70 
-                    ? 'bg-amber-500' 
-                    : 'bg-blue-600'
-              }`}
-              style={{ width: `${usedPercent}%` }}
-            />
+          <div className="space-y-3 mb-3">
+            <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden flex">
+              <div 
+                className="bg-blue-600 h-full transition-all duration-500"
+                style={{ width: `${myUsedPercent}%` }}
+                title={`আমার ফাইলসমূহ: ${formatBytes(myUsed)}`}
+              />
+              <div 
+                className="bg-slate-400 h-full transition-all duration-500"
+                style={{ width: `${otherUsedPercent}%` }}
+                title={`অন্যান্য সিস্টেম ফাইলসমূহ: ${formatBytes(otherUsed)}`}
+              />
+            </div>
+
+            {/* Clear Legends Indicator */}
+            <div className="space-y-1.5 text-[10px] text-slate-500 border-t border-slate-100 pt-2.5">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-600 inline-block shrink-0" />
+                  <span>আমার ফাইলসমূহ</span>
+                </span>
+                <span className="font-semibold font-mono text-slate-700">{formatBytes(myUsed)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />
+                  <span>অন্যান্য সিস্টেম ফাইল</span>
+                </span>
+                <span className="font-semibold font-mono text-slate-700">{formatBytes(otherUsed)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-slate-200 inline-block shrink-0" />
+                  <span>অব্যবহৃত স্টোরেজ</span>
+                </span>
+                <span className="font-semibold font-mono text-slate-700">{formatBytes(freeBytes)}</span>
+              </div>
+            </div>
           </div>
         )}
 
