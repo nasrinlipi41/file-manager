@@ -11,7 +11,7 @@ import {
   Plus
 } from 'lucide-react';
 
-import { FileItem, StorageStats, ClipboardState } from './types';
+import { FileItem, StorageStats, ClipboardState, UploadingFile } from './types';
 import { getFileTypeCategory } from './utils';
 
 import Sidebar from './components/Sidebar';
@@ -22,6 +22,7 @@ import NewFolderModal from './components/NewFolderModal';
 import RenameModal from './components/RenameModal';
 import FilePreviewModal from './components/FilePreviewModal';
 import DeleteConfirmModal from './components/DeleteConfirmModal';
+import UploadProgressPanel from './components/UploadProgressPanel';
 
 export default function App() {
   // Navigation & File States
@@ -40,7 +41,12 @@ export default function App() {
 
   // Modals & UI States
   const [loading, setLoading] = useState<boolean>(false);
-  const [uploading, setUploading] = useState<boolean>(false);
+  
+  // Upload Queue States and Refs
+  const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([]);
+  const uploading = uploadQueue.some((item) => item.status === 'uploading');
+  const activeXhrsRef = useRef<{ [key: string]: XMLHttpRequest }>({});
+
   const [dragOver, setDragOver] = useState<boolean>(false);
   const [showNewFolderModal, setShowNewFolderModal] = useState<boolean>(false);
   const [activeRenameFile, setActiveRenameFile] = useState<FileItem | null>(null);
@@ -98,37 +104,130 @@ export default function App() {
     fetchStats();
   }, [currentPath]);
 
-  // 3. Handle File Uploads
-  const handleUploadFiles = async (selectedFiles: FileList | null) => {
+  // 3. Handle File Uploads (Granular Parallel Upload Queue with Progress & Cancel)
+  const handleUploadFiles = (selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
 
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('parentPath', currentPath);
-    for (let i = 0; i < selectedFiles.length; i++) {
-      formData.append('files', selectedFiles[i]);
+    const filesArray = Array.from(selectedFiles);
+    const targetPath = currentPath; // lock path for this upload batch
+
+    // Create queue items
+    const newItems: UploadingFile[] = filesArray.map((file) => {
+      const id = `upload-${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      return {
+        id,
+        name: file.name,
+        size: file.size,
+        progress: 0,
+        status: 'uploading'
+      };
+    });
+
+    // Append to existing queue
+    setUploadQueue((prev) => [...prev, ...newItems]);
+
+    // Start each upload in parallel using XMLHttpRequest
+    newItems.forEach((item, index) => {
+      const file = filesArray[index];
+      const { id } = item;
+
+      const xhr = new XMLHttpRequest();
+      activeXhrsRef.current[id] = xhr;
+
+      const formData = new FormData();
+      formData.append('parentPath', targetPath);
+      formData.append('files', file);
+
+      // Track progress
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setUploadQueue((prev) =>
+            prev.map((queueItem) =>
+              queueItem.id === id ? { ...queueItem, progress: percent } : queueItem
+            )
+          );
+        }
+      };
+
+      // Completed/Response
+      xhr.onload = () => {
+        delete activeXhrsRef.current[id];
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setUploadQueue((prev) =>
+            prev.map((queueItem) =>
+              queueItem.id === id ? { ...queueItem, progress: 100, status: 'completed' } : queueItem
+            )
+          );
+          showNotification(`"${file.name}" সফলভাবে আপলোড হয়েছে!`, 'success');
+          fetchFiles();
+          fetchStats();
+        } else {
+          let errorMsg = 'আপলোড ব্যর্থ হয়েছে';
+          try {
+            const data = JSON.parse(xhr.responseText);
+            errorMsg = data.error || errorMsg;
+          } catch (e) {
+            // fallback
+          }
+          setUploadQueue((prev) =>
+            prev.map((queueItem) =>
+              queueItem.id === id ? { ...queueItem, status: 'error', error: errorMsg } : queueItem
+            )
+          );
+          showNotification(`"${file.name}" আপলোডে ত্রুটি: ${errorMsg}`, 'error');
+        }
+      };
+
+      // Error
+      xhr.onerror = () => {
+        delete activeXhrsRef.current[id];
+        setUploadQueue((prev) =>
+          prev.map((queueItem) =>
+            queueItem.id === id ? { ...queueItem, status: 'error', error: 'নেটওয়ার্ক কানেকশন লস্ট' } : queueItem
+          )
+        );
+        showNotification(`"${file.name}" আপলোড ব্যর্থ হয়েছে`, 'error');
+      };
+
+      // Aborted
+      xhr.onabort = () => {
+        delete activeXhrsRef.current[id];
+        setUploadQueue((prev) =>
+          prev.map((queueItem) =>
+            queueItem.id === id ? { ...queueItem, status: 'cancelled', progress: 0 } : queueItem
+          )
+        );
+        showNotification(`"${file.name}" এর আপলোড বাতিল করা হয়েছে`, 'info');
+      };
+
+      xhr.open('POST', '/api/upload');
+      xhr.send(formData);
+    });
+
+    if (fileInputRef.current) fileInputRef.current.value = ''; // clear input
+  };
+
+  const handleCancelFile = (id: string) => {
+    const xhr = activeXhrsRef.current[id];
+    if (xhr) {
+      xhr.abort();
     }
+  };
 
-    try {
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'ফাইল আপলোডে ব্যর্থ হয়েছে!');
+  const handleCancelAllUploads = () => {
+    Object.keys(activeXhrsRef.current).forEach((id) => {
+      const xhr = activeXhrsRef.current[id];
+      if (xhr) {
+        xhr.abort();
       }
+    });
+    activeXhrsRef.current = {};
+    showNotification('সব ফাইল আপলোড বাতিল করা হয়েছে', 'info');
+  };
 
-      showNotification(`${selectedFiles.length}টি ফাইল সফলভাবে আপলোড হয়েছে!`, 'success');
-      fetchFiles();
-      fetchStats();
-    } catch (err: any) {
-      showNotification(err.message || 'ফাইল আপলোড ব্যর্থ হয়েছে', 'error');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = ''; // clear input
-    }
+  const handleClearUploadQueue = () => {
+    setUploadQueue([]);
   };
 
   // Trigger file browser click
@@ -508,6 +607,14 @@ export default function App() {
           onSubmit={() => handleDeleteItems(itemsToDelete)}
         />
       )}
+
+      {/* 5. Granular Upload Progress Panel (Minimizable & Cancelable) */}
+      <UploadProgressPanel
+        uploadQueue={uploadQueue}
+        onCancelFile={handleCancelFile}
+        onCancelAll={handleCancelAllUploads}
+        onClearQueue={handleClearUploadQueue}
+      />
     </div>
   );
 }

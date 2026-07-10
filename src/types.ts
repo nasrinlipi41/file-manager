@@ -24,3 +24,13 @@ export interface ClipboardState {
   action: 'copy' | 'cut' | null;
   sources: FileItem[];
 }
+
+export interface UploadingFile {
+  id: string;
+  name: string;
+  size: number;
+  progress: number;
+  status: 'uploading' | 'completed' | 'cancelled' | 'error';
+  error?: string;
+  xhr?: XMLHttpRequest;
+}
