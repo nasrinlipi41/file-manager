@@ -452,6 +452,93 @@ async function startServer() {
     }
   });
 
+  // 4c. Get metadata for a URL link
+  app.post('/api/url-metadata', async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+        return res.status(400).json({ error: 'অবৈধ লিঙ্ক প্রদান করা হয়েছে!' });
+      }
+
+      // Try doing a HEAD request, if that fails fallback to GET
+      let response: any;
+      try {
+        response = await fetch(url, { method: 'HEAD' });
+        if (!response.ok) {
+          response = await fetch(url, { method: 'GET' });
+        }
+      } catch (e) {
+        response = await fetch(url, { method: 'GET' });
+      }
+
+      if (!response.ok) {
+        return res.status(400).json({ error: 'লিঙ্ক থেকে ফাইল তথ্য পেতে ব্যর্থ!' });
+      }
+
+      const contentLength = response.headers.get('content-length');
+      const size = contentLength ? parseInt(contentLength, 10) : 0;
+
+      // Extract filename
+      let filename = '';
+      const contentDisposition = response.headers.get('content-disposition');
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?"?([^";\n]+)"?/i);
+        if (match && match[1]) {
+          filename = decodeURIComponent(match[1]);
+        } else {
+          const matchSimple = contentDisposition.match(/filename="?([^";\n]+)"?/i);
+          if (matchSimple && matchSimple[1]) {
+            filename = matchSimple[1];
+          }
+        }
+      }
+
+      if (!filename) {
+        try {
+          const urlObj = new URL(url);
+          filename = path.basename(urlObj.pathname);
+        } catch (e) {}
+      }
+
+      filename = filename ? filename.trim() : '';
+      filename = filename.split('?')[0].split('#')[0];
+
+      if (!filename) {
+        filename = 'downloaded_file';
+        const contentType = response.headers.get('content-type');
+        if (contentType) {
+          const mimeMap: { [key: string]: string } = {
+            'image/jpeg': '.jpg',
+            'image/png': '.png',
+            'image/gif': '.gif',
+            'image/webp': '.webp',
+            'application/pdf': '.pdf',
+            'audio/mpeg': '.mp3',
+            'video/mp4': '.mp4',
+            'application/zip': '.zip',
+            'text/plain': '.txt',
+            'text/html': '.html',
+            'application/json': '.json'
+          };
+          const ext = mimeMap[contentType.split(';')[0].trim().toLowerCase()];
+          if (ext) {
+            filename += ext;
+          }
+        }
+      }
+
+      const safeName = filename.replace(/[/\\?%*:|"<>\x00-\x1F]/g, '_').trim();
+
+      res.json({
+        success: true,
+        name: safeName,
+        size: isNaN(size) ? 0 : size
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // 5. Delete Files/Folders (Supports multiple deletions)
   app.post('/api/delete', async (req, res) => {
     try {

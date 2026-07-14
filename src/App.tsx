@@ -337,6 +337,34 @@ export default function App() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
+      // Fetch file metadata first (size & real filename) to update the queue item
+      let realName = extractedName;
+      let realSize = 0;
+      try {
+        const metaResponse = await fetch('/api/url-metadata', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ url }),
+          signal: controller.signal
+        });
+        if (metaResponse.ok) {
+          const metaData = await metaResponse.json();
+          realName = metaData.name || extractedName;
+          realSize = metaData.size || 0;
+          
+          // Update queue with real name and size
+          setUploadQueue((prev) =>
+            prev.map((item) =>
+              item.id === id
+                ? { ...item, name: realName, size: realSize }
+                : item
+            )
+          );
+        }
+      } catch (metaErr) {
+        // Ignored, proceed with provisional metadata
+      }
+
       const response = await fetch('/api/upload-url', {
         method: 'POST',
         headers,
@@ -354,15 +382,15 @@ export default function App() {
             item.id === id
               ? {
                   ...item,
-                  name: data.file.name,
-                  size: data.file.size,
+                  name: data.file.name || realName,
+                  size: data.file.size || realSize,
                   progress: 100,
                   status: 'completed'
                 }
               : item
           )
         );
-        showNotification(`"${data.file.name}" লিঙ্ক থেকে সফলভাবে ডাউনলোড হয়েছে!`, 'success');
+        showNotification(`"${data.file.name || realName}" লিঙ্ক থেকে সফলভাবে ডাউনলোড হয়েছে!`, 'success');
         fetchFiles();
         fetchStats();
       } else {
